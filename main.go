@@ -70,7 +70,7 @@ func main() {
       }
     }
 
-    fmt.Println()
+    fmt.Print("\r                                   \r")
     z++
   }
 
