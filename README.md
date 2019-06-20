@@ -21,4 +21,12 @@ the top left tile.
 
     slicerdicer --help
 
-    slicerdicer --filename foo.png --tile-size 256
+    slicerdicer --filename foo.png --tile-size 256 --concurrency 5
+
+## Notes
+
+It's going to eat some memory. 
+
+In my tests on an 32641 x 16471, 8-bit/color RGB PNG, memory usage peaks at
+around 2.7GB.
+
