@@ -1,10 +1,10 @@
 # slicerdicer
 
 Slice and dice an image, turning it into many equal sized tiles. Useful
-for things like leaflet.js, with the Leaflet.Zoomify plugin.
+for tools like leaflet.js, to create interactive "slippy" maps.
 
 The image is sliced up into equal sized tiles, based on the command line 
-option `--tile-size` (default 512 pixels). 
+option `--tile-size` (default 256 pixels). 
 
 Once the tiling is finished, the original is resized to half its current
 dimensions (the orignal file on disk is not touched) and the process repeats.
@@ -25,8 +25,12 @@ the top left tile.
 
 ## Notes
 
-It's going to eat some memory. 
+### Memory
 
 In my tests on an 32641 x 16471, 8-bit/color RGB PNG, memory usage peaks at
 around 2.7GB.
 
+### Speed
+
+On that same test image, the run takes around 63 seconds to create the 11179
+tiles, on my fairly underwhelming MacBookPro12,1 (dual core i5).
