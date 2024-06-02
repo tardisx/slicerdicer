@@ -4,8 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/disintegration/imaging"
 )
@@ -18,11 +21,18 @@ func main() {
 	tileSizePtr := flag.Int("tile-size", 256, "tile size, in pixels")
 	concurrencyPtr := flag.Int("concurrency", 5, "how many tiles to generate concurrently (threads)")
 	baseName := flag.String("basename", "tile", "base of the output files")
+	outFormat := flag.String("format", "png", "output format (jpg/png)")
+	pathTemplate := flag.String("path-template", "%s-%d-%d-%d.%s", "template for output files - base, zoom, x, y, format")
 
 	flag.Parse()
 
 	if *filenamePtr == "" {
 		fmt.Println("Error: You must specify a filename with --filename")
+		return
+	}
+
+	if *outFormat != "jpg" && *outFormat != "png" {
+		fmt.Println("Error: -format must be jpg or png")
 		return
 	}
 
@@ -74,7 +84,7 @@ func main() {
 		for y := 0; y < (size.Y / tile_size_y); y++ {
 			for x := 0; x < (size.X / tile_size_x); x++ {
 				sem <- true
-				go tile(*baseName, src, z, x, y, tile_size_x, tile_size_y, sem)
+				go tile(*baseName, *pathTemplate, *outFormat, src, z, x, y, tile_size_x, tile_size_y, sem)
 			}
 
 		}
@@ -94,17 +104,37 @@ func main() {
 	fmt.Println("done")
 }
 
-func tile(basename string, src image.Image, z, x, y int, tile_size_x, tile_size_y int, sem chan bool) {
+func createPathAndFile(fn string) (io.WriteCloser, error) {
+
+	dir, _ := filepath.Split(fn)
+	err := os.MkdirAll(dir, 0777)
+	if err != nil {
+		return nil, err
+	}
+
+	writer, err := os.Create(fn)
+	return writer, err
+}
+
+func tile(basename string, pathTemplate string, format string, src image.Image, z, x, y int, tile_size_x, tile_size_y int, sem chan bool) {
 	defer func() { <-sem }()
-	output_filename := fmt.Sprintf("%s-%d-%d-%d.png", basename, z, x, y)
+	output_filename := fmt.Sprintf(pathTemplate, basename, z, x, y, format)
 	cropped := imaging.Crop(src, image.Rect(tile_size_x*x, tile_size_y*y, tile_size_x*x+tile_size_x, tile_size_y*y+tile_size_y))
 
-	writer, _ := os.Create(output_filename)
-	err := png.Encode(writer, cropped)
+	fmt.Printf("writing to %s\n", output_filename)
+	writer, err := createPathAndFile(output_filename)
+	if err != nil {
+		panic(err)
+	}
+	if format == "png" {
+		err = png.Encode(writer, cropped)
+	} else if format == "jpg" {
+		err = jpeg.Encode(writer, cropped, &jpeg.Options{
+			Quality: 40,
+		})
+	}
 	if err != nil {
 		fmt.Println(err)
 	}
 	writer.Close()
-
-	return
 }
