@@ -17,8 +17,6 @@ import (
 	"github.com/disintegration/imaging"
 )
 
-const currentVersion = "0.01"
-
 type resultPrinter struct {
 	batchTotal   int
 	count        int
