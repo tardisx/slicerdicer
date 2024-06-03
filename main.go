@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,6 +42,8 @@ func (rp *resultPrinter) Run() {
 	}
 }
 
+const defaultPathTemplate = "%s-%d-%d-%d.%s"
+
 func main() {
 	t0 := time.Now()
 	filenamePtr := flag.String("filename", "", "filename to open")
@@ -48,7 +51,7 @@ func main() {
 	concurrencyPtr := flag.Int("concurrency", 5, "how many tiles to generate concurrently (threads)")
 	baseName := flag.String("basename", "tile", "base of the output files")
 	outFormat := flag.String("format", "png", "output format (jpg/png)")
-	pathTemplate := flag.String("path-template", "%s-%d-%d-%d.%s", "template for output files - base, zoom, x, y, format")
+	pathTemplate := flag.String("path-template", defaultPathTemplate, "template for output files - base, zoom, x, y, format")
 
 	flag.Parse()
 
@@ -63,16 +66,27 @@ func main() {
 	}
 
 	log.Println("opening file:", *filenamePtr)
-	src, err := imaging.Open(*filenamePtr)
+	src, err := os.Open(*filenamePtr)
 	if err != nil {
 		fmt.Println("Error: Could not open file:", err)
 		return
 	}
 
+	processImage(src, *baseName, *pathTemplate, *outFormat, *tileSizePtr, *concurrencyPtr, diskOutput{})
+	log.Printf("done in %.2f", time.Since(t0).Seconds())
+}
+
+func processImage(input io.Reader, basename string, pathTemplate string, format string, tileSize int, concurrency int, output outputter) {
+
+	src, err := imaging.Decode(input)
+	if err != nil {
+		panic(err)
+	}
+
 	size := src.Bounds().Max
 
-	tile_size_x := *tileSizePtr
-	tile_size_y := *tileSizePtr
+	tile_size_x := tileSize
+	tile_size_y := tileSize
 
 	// work out maximum zoom
 	var max_zoom int
@@ -88,9 +102,6 @@ func main() {
 
 	z := max_zoom
 	log.Println("maximum zoom level is", max_zoom)
-
-	concurrency := *concurrencyPtr
-
 	log.Println("starting tiling with concurrency of", concurrency)
 
 	results := make(chan string)
@@ -126,8 +137,16 @@ func main() {
 
 		log.Printf("zoom level: %d (%d x %d)\n", z, size.X, size.Y)
 
-		yTiles := (size.Y / tile_size_y)
-		xTiles := (size.X / tile_size_x)
+		// size 257 => 2
+		// size 256 => 1
+		// size 255 => 1
+		yTiles := int(math.Ceil(float64(size.Y) / float64(tile_size_y)))
+		xTiles := int(math.Ceil(float64(size.X) / float64(tile_size_x)))
+
+		if z == 0 {
+			xTiles = 1
+			yTiles = 1
+		}
 		tilesToRender := xTiles * yTiles
 
 		rp.Reset(tilesToRender)
@@ -135,12 +154,14 @@ func main() {
 		wg := sync.WaitGroup{}
 		wg.Add(tilesToRender)
 
+		log.Printf("rendering %d tiles", tilesToRender)
+
 		for y := 0; y < yTiles; y++ {
 			for x := 0; x < xTiles; x++ {
 				jobs <- tileJob{
-					baseName:     *baseName,
-					pathTemplate: *pathTemplate,
-					format:       *outFormat,
+					baseName:     basename,
+					pathTemplate: pathTemplate,
+					format:       format,
 					src:          src,
 					zoom:         z,
 					x:            x,
@@ -148,6 +169,7 @@ func main() {
 					tileSizeX:    tile_size_x,
 					tileSizeY:    tile_size_y,
 					wg:           &wg,
+					output:       output,
 				}
 			}
 
@@ -164,11 +186,17 @@ func main() {
 		fmt.Print("\033[u\033[K") // restore the cursor position and clear the line
 	}
 	close(results)
-	log.Printf("done in %.2f", time.Since(t0).Seconds())
-
+	log.Printf("all tiles complete")
 }
 
-func createPathAndFile(fn string) (io.WriteCloser, error) {
+type outputter interface {
+	CreatePathAndFile(fn string) (io.WriteCloser, error)
+}
+
+type diskOutput struct {
+}
+
+func (do diskOutput) CreatePathAndFile(fn string) (io.WriteCloser, error) {
 	dir, _ := filepath.Split(fn)
 	err := os.MkdirAll(dir, 0777)
 	if err != nil {
@@ -188,6 +216,7 @@ type tileJob struct {
 	x, y         int
 	tileSizeX    int
 	tileSizeY    int
+	output       outputter
 	wg           *sync.WaitGroup
 }
 
@@ -197,7 +226,7 @@ func tileWorker(jobs <-chan tileJob, results chan<- string) {
 		cropped := imaging.Crop(j.src, image.Rect(j.tileSizeX*j.x, j.tileSizeY*j.y, j.tileSizeX*j.x+j.tileSizeX, j.tileSizeY*j.y+j.tileSizeY))
 
 		// log.Printf("writing to %s", output_filename)
-		writer, err := createPathAndFile(output_filename)
+		writer, err := j.output.CreatePathAndFile(output_filename)
 		if err != nil {
 			panic(err)
 		}
@@ -207,6 +236,8 @@ func tileWorker(jobs <-chan tileJob, results chan<- string) {
 			err = jpeg.Encode(writer, cropped, &jpeg.Options{
 				Quality: 40,
 			})
+		} else {
+			panic("bad format")
 		}
 		if err != nil {
 			panic(err)
