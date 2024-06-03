@@ -234,7 +234,6 @@ func tileWorker(jobs <-chan tileJob, results chan<- string) {
 		writer, err := j.output.CreatePathAndFile(output_filename)
 		if err != nil {
 			log.Fatalf("could not create path/file: '%s'", err.Error())
-			panic(err)
 		}
 		if j.format == "png" {
 			err = png.Encode(writer, cropped)
