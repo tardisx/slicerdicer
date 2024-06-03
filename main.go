@@ -44,33 +44,36 @@ const defaultPathTemplate = "%s-%d-%d-%d.%s"
 
 func main() {
 	t0 := time.Now()
-	filenamePtr := flag.String("filename", "", "filename to open")
-	tileSizePtr := flag.Int("tile-size", 256, "tile size, in pixels")
-	concurrencyPtr := flag.Int("concurrency", 5, "how many tiles to generate concurrently (threads)")
-	baseName := flag.String("basename", "tile", "base of the output files")
-	outFormat := flag.String("format", "png", "output format (jpg/png)")
-	pathTemplate := flag.String("path-template", defaultPathTemplate, "template for output files - base, zoom, x, y, format")
+	var filename, baseName, outputFormat, pathTemplate string
+	var tileSize, concurrency int
+
+	flag.StringVar(&filename, "filename", "", "filename to open")
+	flag.IntVar(&tileSize, "tile-size", 256, "tile size, in pixels")
+	flag.IntVar(&concurrency, "concurrency", 5, "how many tiles to generate concurrently (threads)")
+	flag.StringVar(&baseName, "basename", "tile", "base of the output files")
+	flag.StringVar(&outputFormat, "format", "png", "output format (jpg/png)")
+	flag.StringVar(&pathTemplate, "path-template", defaultPathTemplate, "template for output files - base, zoom, x, y, format")
 
 	flag.Parse()
 
-	if *filenamePtr == "" {
-		fmt.Println("Error: You must specify a filename with --filename")
+	if filename == "" {
+		fmt.Println("Error: You must specify a filename with -filename")
 		return
 	}
 
-	if *outFormat != "jpg" && *outFormat != "png" {
+	if outputFormat != "jpg" && outputFormat != "png" {
 		fmt.Println("Error: -format must be jpg or png")
 		return
 	}
 
-	log.Println("opening file:", *filenamePtr)
-	src, err := os.Open(*filenamePtr)
+	log.Println("opening file:", filename)
+	src, err := os.Open(filename)
 	if err != nil {
 		fmt.Println("Error: Could not open file:", err)
 		return
 	}
 
-	processImage(src, *baseName, *pathTemplate, *outFormat, *tileSizePtr, *concurrencyPtr, diskOutput{})
+	processImage(src, baseName, pathTemplate, outputFormat, tileSize, concurrency, diskOutput{})
 	log.Printf("done in %.2f", time.Since(t0).Seconds())
 }
 
@@ -101,6 +104,7 @@ func processImage(input io.Reader, basename string, pathTemplate string, format 
 	z := max_zoom
 	log.Println("maximum zoom level is", max_zoom)
 	log.Println("starting tiling with concurrency of", concurrency)
+	log.Printf("basename '%s'", basename)
 
 	results := make(chan string)
 	rp := resultPrinter{
@@ -196,9 +200,13 @@ type diskOutput struct {
 
 func (do diskOutput) CreatePathAndFile(fn string) (io.WriteCloser, error) {
 	dir, _ := filepath.Split(fn)
-	err := os.MkdirAll(dir, 0777)
-	if err != nil {
-		return nil, err
+	if dir == "" {
+		// no need to do anything, going in current dir
+	} else {
+		err := os.MkdirAll(dir, 0777)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	writer, err := os.Create(fn)
@@ -223,9 +231,9 @@ func tileWorker(jobs <-chan tileJob, results chan<- string) {
 		output_filename := fmt.Sprintf(j.pathTemplate, j.baseName, j.zoom, j.x, j.y, j.format)
 		cropped := imaging.Crop(j.src, image.Rect(j.tileSizeX*j.x, j.tileSizeY*j.y, j.tileSizeX*j.x+j.tileSizeX, j.tileSizeY*j.y+j.tileSizeY))
 
-		// log.Printf("writing to %s", output_filename)
 		writer, err := j.output.CreatePathAndFile(output_filename)
 		if err != nil {
+			log.Fatalf("could not create path/file: '%s'", err.Error())
 			panic(err)
 		}
 		if j.format == "png" {
